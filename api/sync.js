@@ -4,12 +4,12 @@ import OpenAI from 'openai';
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-async function getEmbedding(text) {
-  const res = await openai.embeddings.create({ model: 'text-embedding-3-small', input: text });
-  return res.data[0].embedding;
+async function getBatchEmbeddings(texts) {
+  const res = await openai.embeddings.create({ model: 'text-embedding-3-small', input: texts });
+  return res.data.map(d => d.embedding);
 }
 
-async function fetchShopifyProducts() {
+async function fetchAllProducts() {
   const products = [];
   let url = `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/products.json?limit=250`;
   while (url) {
@@ -23,7 +23,7 @@ async function fetchShopifyProducts() {
   return products;
 }
 
-async function fetchShopifyPages() {
+async function fetchAllPages() {
   const res = await fetch(
     `https://${process.env.SHOPIFY_STORE_DOMAIN}/admin/api/2024-01/pages.json?limit=250`,
     { headers: { 'X-Shopify-Access-Token': process.env.SHOPIFY_ADMIN_TOKEN } }
@@ -38,39 +38,50 @@ export default async function handler(req, res) {
   }
 
   try {
-    const products = await fetchShopifyProducts();
-    for (const product of products) {
-      const text = [
-        product.title,
-        product.body_html?.replace(/<[^>]*>/g, '') || '',
-        product.tags,
-        product.variants?.[0]?.price ? `Price: $${product.variants[0].price}` : ''
-      ].filter(Boolean).join(' ');
-      const embedding = await getEmbedding(text);
-      await supabase.from('products').upsert({
-        id: product.id.toString(),
-        title: product.title,
-        body: product.body_html?.replace(/<[^>]*>/g, '') || '',
-        handle: product.handle,
-        url: `/products/${product.handle}`,
-        price: product.variants?.[0]?.price || '',
-        tags: product.tags,
-        embedding
-      });
+    const BATCH = 50;
+
+    const products = await fetchAllProducts();
+    const productTexts = products.map(p => [
+      p.title,
+      p.body_html?.replace(/<[^>]*>/g, '') || '',
+      p.tags,
+      p.variants?.[0]?.price ? `Price: $${p.variants[0].price}` : ''
+    ].filter(Boolean).join(' '));
+
+    const productEmbeddings = [];
+    for (let i = 0; i < productTexts.length; i += BATCH) {
+      const embeddings = await getBatchEmbeddings(productTexts.slice(i, i + BATCH));
+      productEmbeddings.push(...embeddings);
     }
 
-    const pages = await fetchShopifyPages();
-    for (const page of pages) {
-      const text = `${page.title} ${page.body_html?.replace(/<[^>]*>/g, '') || ''}`;
-      const embedding = await getEmbedding(text);
-      await supabase.from('pages').upsert({
-        id: page.id.toString(),
-        title: page.title,
-        body: page.body_html?.replace(/<[^>]*>/g, '') || '',
-        url: `/pages/${page.handle}`,
-        embedding
-      });
+    const productRecords = products.map((p, i) => ({
+      id: p.id.toString(),
+      title: p.title,
+      body: p.body_html?.replace(/<[^>]*>/g, '') || '',
+      handle: p.handle,
+      url: `/products/${p.handle}`,
+      price: p.variants?.[0]?.price || '',
+      tags: p.tags,
+      embedding: productEmbeddings[i]
+    }));
+
+    for (let i = 0; i < productRecords.length; i += BATCH) {
+      await supabase.from('products').upsert(productRecords.slice(i, i + BATCH));
     }
+
+    const pages = await fetchAllPages();
+    const pageTexts = pages.map(p => `${p.title} ${p.body_html?.replace(/<[^>]*>/g, '') || ''}`);
+    const pageEmbeddings = pageTexts.length ? await getBatchEmbeddings(pageTexts) : [];
+
+    const pageRecords = pages.map((p, i) => ({
+      id: p.id.toString(),
+      title: p.title,
+      body: p.body_html?.replace(/<[^>]*>/g, '') || '',
+      url: `/pages/${p.handle}`,
+      embedding: pageEmbeddings[i]
+    }));
+
+    if (pageRecords.length) await supabase.from('pages').upsert(pageRecords);
 
     res.json({ success: true, synced: { products: products.length, pages: pages.length } });
   } catch (error) {
