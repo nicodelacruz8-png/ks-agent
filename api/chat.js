@@ -138,7 +138,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { query } = req.body || {};
+  const { query, history } = req.body || {};
   if (!query) return res.status(400).json({ error: 'Missing query' });
 
   const supabase = createClient(
@@ -148,9 +148,19 @@ export default async function handler(req, res) {
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY?.trim() });
 
   try {
+    // Enrich the embedding query with context from the last user turn so that
+    // follow-up questions ("what about lighter ones?") find relevant products
+    let embeddingQuery = query;
+    if (Array.isArray(history) && history.length >= 2) {
+      const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
+      if (lastUserMsg) {
+        embeddingQuery = lastUserMsg.content.slice(0, 300) + ' ' + query;
+      }
+    }
+
     const embRes = await openai.embeddings.create({
       model: 'text-embedding-3-small',
-      input: query
+      input: embeddingQuery.slice(0, 500)
     });
     const embedding = embRes.data[0].embedding;
 
@@ -177,16 +187,21 @@ export default async function handler(req, res) {
         ).join('\n')
       : 'No products met the relevance threshold. Recommend based on product category knowledge only.';
 
+    // Build messages: system → conversation history → current user turn with catalog
+    const recentHistory = Array.isArray(history) ? history.slice(-6) : [];
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      ...recentHistory.map(m => ({ role: m.role, content: m.content })),
+      {
+        role: 'user',
+        content: `Customer query: "${query}"\n\nAvailable catalog results (check Tags/Keywords match before recommending):\n${productContext}`
+      }
+    ];
+
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `Customer query: "${query}"\n\nAvailable catalog results (check Tags/Keywords match before recommending):\n${productContext}`
-        }
-      ],
+      messages,
       max_tokens: 700,
       temperature: 0.5
     });
