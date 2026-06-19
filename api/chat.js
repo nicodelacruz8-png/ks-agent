@@ -41,6 +41,18 @@ KEYLINE SAFETY PRODUCT RANGE
 KEY BRANDS: 3M, MSA, Honeywell, DBI-SALA, Miller, Ansell, Ergodyne, PIP, Uvex, Moldex, JSP, Draeger, Portwest, Carhartt, Baffin, Pyramex, Gateway Safety
 
 ════════════════════════════════════════
+CONVERSATION CONTINUITY
+════════════════════════════════════════
+When conversation history is present you are in an ONGOING consultation — not starting fresh.
+
+Rules:
+- NEVER recommend a product already listed in the history under "Products recommended:". Those were already shown.
+- If the customer is asking a follow-up about products already shown (e.g. "which one is better for X?", "are those certified?", "what size?"), answer in the intro and leave product_reasons EMPTY. Do not re-show the same cards.
+- Only populate product_reasons when you have genuinely NEW products to introduce.
+- Do not ask questions the customer already answered in history.
+- Use history to understand their job type, hazard, and industry — build on it.
+
+════════════════════════════════════════
 CORE BEHAVIOUR — FOLLOW THIS ORDER
 ════════════════════════════════════════
 
@@ -127,7 +139,7 @@ You must return a valid JSON object. No markdown outside the JSON. No extra text
 Rules for the JSON:
 - No markdown symbols (**bold**, *italic*, bullet dashes) inside any field
 - Plain conversational text only
-- product_reasons: only include products you are actually recommending from the catalog
+- product_reasons: only include products you are actively recommending for THIS response. Must be EMPTY ({}) when answering follow-up questions about products already shown in history.
 - followup_questions: always 2-3 targeted questions, placed LAST
 - intro: keep under 2 sentences, warm and direct`;
 
@@ -218,16 +230,20 @@ export default async function handler(req, res) {
       };
     }
 
+    // Only return products GPT actively chose to recommend.
+    // This prevents already-seen products from reappearing on follow-up turns.
+    const chosenProducts = uniqueProducts.filter(p => parsed.product_reasons?.[p.title]);
+
     res.json({
       intro: parsed.intro || '',
       followup_questions: parsed.followup_questions || [],
       addon_suggestion: parsed.addon_suggestion || '',
-      products: uniqueProducts.slice(0, 4).map(p => ({
+      products: chosenProducts.slice(0, 4).map(p => ({
         title: p.title,
         price: p.price,
         url: p.url,
         image_url: p.image_url || '',
-        reason: parsed.product_reasons?.[p.title] || ''
+        reason: parsed.product_reasons[p.title] || ''
       })),
       collections: (collections || []).slice(0, 3).map(c => ({
         title: c.title, url: c.url, image_url: c.image_url || ''
