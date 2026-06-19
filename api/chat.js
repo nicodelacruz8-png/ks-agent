@@ -50,6 +50,10 @@ function normalizeTitle(value) {
   return String(value || '').trim().toLowerCase();
 }
 
+function normalizeSearchText(value) {
+  return normalizeTitle(value).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function uniqueBy(items, getKey) {
   const seen = new Set();
   return (items || []).filter(item => {
@@ -108,8 +112,22 @@ function historyToPrompt(history) {
   if (!history.length) return 'None';
 
   return history
-    .map(m => `${m.role === 'user' ? 'Customer' : 'KS Agent'}: ${m.content}`)
+    .map(m => `${m.role === 'user' ? 'Customer' : 'Keisha'}: ${m.content}`)
     .join('\n');
+}
+
+function findMentionedCollection(query, collections) {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) return null;
+
+  return (collections || []).find(collection => {
+    const title = normalizeSearchText(collection.title);
+    const handle = normalizeSearchText(collection.handle);
+    return Boolean(
+      (title && normalizedQuery.includes(title)) ||
+      (handle && normalizedQuery.includes(handle))
+    );
+  }) || null;
 }
 
 function buildProductContext(products) {
@@ -156,6 +174,7 @@ function parseJsonModelOutput(rawContent) {
       collection_handles: [],
       article_handles: [],
       followup_questions: [],
+      quick_replies: [],
       addon_suggestion: ''
     };
   }
@@ -227,6 +246,17 @@ export default async function handler(req, res) {
     const products = uniqueBy(prodRes.data || [], p => normalizeTitle(p.title));
     const collections = uniqueBy(collRes.data || [], c => c.handle || normalizeTitle(c.title));
     const articles = uniqueBy(artRes.data || [], a => a.handle || normalizeTitle(a.title));
+    const mentionedCollection = findMentionedCollection(cleanQuery, collections);
+
+    if (mentionedCollection && !classification.isFrustrated) {
+      classification.label = classification.isBrandQuery ? classification.label : 'collection_or_category';
+      classification.mustClarifyFirst = false;
+      classification.mentionedCollectionTitle = mentionedCollection.title;
+      classification.guidance = [
+        classification.guidance,
+        `The customer mentioned or closely matched the available collection "${mentionedCollection.title}". Treat that as clear enough to recommend relevant products now. Include that collection page if useful, and ask follow-up questions after the product suggestions.`
+      ].filter(Boolean).join(' ');
+    }
 
     const shownProducts = uniqueBy([
       ...cleanStringArray(shownProductsFromClient),
@@ -332,6 +362,7 @@ export default async function handler(req, res) {
         image_url: a.image_url || ''
       })),
       followup_questions: cleanStringArray(parsed.followup_questions).slice(0, 3),
+      quick_replies: cleanStringArray(parsed.quick_replies).slice(0, 4),
       addon_suggestion: String(parsed.addon_suggestion || ''),
       memory: {
         products_shown: uniqueBy([
@@ -345,7 +376,7 @@ export default async function handler(req, res) {
       }
     });
   } catch (err) {
-    console.error('KS Agent error:', err);
+    console.error('Keisha chat error:', err);
     return res.status(500).json({
       error: 'Internal server error',
       details: err.message
