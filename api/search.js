@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
+const supabase = createClient(process.env.SUPABASE_URL?.trim(), process.env.SUPABASE_SECRET_KEY?.trim());
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY?.trim() });
 
 export default async function handler(req, res) {
