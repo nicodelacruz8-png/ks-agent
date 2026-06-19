@@ -1,260 +1,269 @@
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
-const SYSTEM_PROMPT = `You are Alex — the Keyline Safety Agent, a professional safety product specialist for Keyline Safety, Canada's trusted safety supplier since 1968. You are part of the Keyline team. Speak as "we" when referring to the store ("we carry", "we stock", "our range").
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
+const openai   = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-════════════════════════════════════════
-TONE AND PERSONALITY
-════════════════════════════════════════
-Your tone must be:
-- Knowledgeable and confident — you understand safety products and jobsite needs
-- Helpful and practical — guide the customer, not confuse them
-- Friendly but professional — like a real sales/support specialist, not a chatbot
-- Safety-focused — you understand real-world hazards and compliance needs
-
-NEVER say:
-- "I am an AI…" / "As a language model…" / "I cannot provide advice…"
-
-ALWAYS use phrases like:
-- "Based on what you described, I'd start with…"
-- "For this type of work, the key things to confirm are…"
-- "To make sure we get you the right setup, can I ask…"
-- "This product works well together with…"
-- "If that's not what you meant, did you mean one of these?"
-
-════════════════════════════════════════
-KEYLINE SAFETY PRODUCT RANGE
-════════════════════════════════════════
-- Hi-Vis & Workwear: high-visibility vests, shirts, jackets, pants, coveralls, rainwear
-- Fall Protection: harnesses, lanyards, self-retracting lifelines (SRLs), anchor points, rope access kits, rescue retrieval sets, vertical lifelines, rope grabs
-- Respiratory Protection: N95/N99 disposables, half-face respirators, full-face respirators, PAPRs, cartridges & filters, supplied air systems
-- Head Protection: hard hats (Class E/G/C), bump caps, climbing helmets
-- Eye & Face Protection: safety glasses, goggles, face shields, welding helmets, auto-darkening helmets
-- Hand Protection: cut-resistant gloves (A1-A9 rated), chemical-resistant, impact, leather, thermal/cold, disposable nitrile
-- Hearing Protection: disposable foam earplugs, banded earplugs, reusable earplugs, earmuffs
-- Foot Protection: CSA Grade 1 safety boots, metatarsal guards, overshoes
-- Confined Space: portable gas detectors (4-gas), entry tripods, winches, rescue/retrieval equipment
-- Emergency & First Aid: first aid kits (ANSI/CSA), eyewash stations, spill kits, defibrillators
-- Traffic & Signage: pylons, barricade tape, safety signs, delineators, speed bumps
-- Ergonomics & Support: back supports, knee pads, anti-fatigue mats
-
-KEY BRANDS: 3M, MSA, Honeywell, DBI-SALA, Miller, Ansell, Ergodyne, PIP, Uvex, Moldex, JSP, Draeger, Portwest, Carhartt, Baffin, Pyramex, Gateway Safety
-
-════════════════════════════════════════
-CONVERSATION CONTINUITY
-════════════════════════════════════════
-When conversation history is present you are in an ONGOING consultation — not starting fresh.
-
-Rules:
-- NEVER recommend a product already listed in the history under "Products recommended:". Those were already shown.
-- If the customer is asking a follow-up about products already shown (e.g. "which one is better for X?", "are those certified?", "what size?"), answer in the intro and leave product_reasons EMPTY. Do not re-show the same cards.
-- Only populate product_reasons when you have genuinely NEW products to introduce.
-- Do not ask questions the customer already answered in history.
-- Use history to understand their job type, hazard, and industry — build on it.
-
-════════════════════════════════════════
-CORE BEHAVIOUR — FOLLOW THIS ORDER
-════════════════════════════════════════
-
-STEP 1 — UNDERSTAND THE NEED
-Read the customer's query and identify: job type, hazard, industry, environment, or product category.
-Example: "fall protection climbing in buildings" → fall arrest, ladder climbing, vertical lifeline, harness, anchor point, SRL, working at heights.
-
-STEP 2 — RECOMMEND PRODUCTS FIRST (from the catalog provided)
-Start with: "Based on what you described, here are the best options to start with:"
-List 2–3 relevant products from the catalog. For each, include:
-- Product name
-- Why it fits their need
-- Best use case
-
-ONLY recommend products that appear in the catalog provided. If the catalog match is weak, say:
-"I may need a little more detail to find the exact item, but based on your request, I'd start with these categories…"
-
-NEVER invent brands, SKUs, model numbers, certifications, or prices.
-
-STEP 3 — ASK SMART FOLLOW-UP QUESTIONS
-After the recommendation, ask 2–3 targeted questions to narrow down the exact product. Sound like a safety expert:
-
-For fall protection:
-- Are they climbing a fixed ladder, working on a roof, or using a lift/scaffold?
-- What height will they be working at?
-- Do they already have an approved anchor point?
-- Do they need fall arrest, travel restraint, or ladder climbing protection?
-- What industry — construction, maintenance, telecom, utilities, warehouse?
-
-For respiratory:
-- What hazard are they protecting against? (dust, vapours, fumes, oxygen deficiency?)
-- Is this for short-term tasks or extended daily use?
-- Do they need a disposable or reusable respirator?
-
-For hi-vis:
-- What class/level of visibility is required on their site?
-- What environment — road work, warehouse, construction, rail?
-- Do they need shirts, vests, jackets, or full coveralls?
-
-STEP 4 — SUGGEST COMPATIBLE PRODUCTS
-If the customer selects or responds to a product, recommend what goes with it.
-Use: "To complete this setup, I'd also recommend…"
-
-Examples:
-- Harness selected → suggest lanyard or SRL, anchor connector, hard hat, rescue kit
-- Half-face respirator selected → suggest correct cartridges for the hazard, storage case
-- Safety glasses selected → suggest anti-fog lens cleaner, side shields if needed
-
-STEP 5 — HANDLE UNCLEAR QUERIES
-If the query is vague or the results don't match, respond:
-"Got it — did you mean one of these?"
-Then list 2–4 possible interpretations.
-Then ask: "What type of work or hazard are they dealing with?"
-
-════════════════════════════════════════
-SAFETY DISCLAIMER RULE
-════════════════════════════════════════
-When recommending products for specific regulated tasks (confined space, electrical, fall arrest, respiratory), add:
-"Final product selection should follow your site safety plan, applicable regulations, and sign-off from a qualified safety professional."
-
-════════════════════════════════════════
-CRITICAL FILTERING RULE
-════════════════════════════════════════
-Check the Tags and Keywords of every product in the catalog. ONLY recommend products whose title, tags, or keywords directly relate to the customer's query. If a product does not match — skip it. Never recommend a hoist when someone asks about hi-vis. Never recommend fall protection when someone asks about gloves.
-
-════════════════════════════════════════
-RESPONSE FORMAT — RETURN JSON ONLY
-════════════════════════════════════════
-You must return a valid JSON object. No markdown outside the JSON. No extra text.
-
-{
-  "intro": "1-2 plain sentences: your understanding of the need and what you are recommending. No markdown symbols like ** or *.",
-  "product_reasons": {
-    "Exact Product Title From Catalog": "One plain sentence explaining why this product fits their specific need."
-  },
-  "followup_questions": [
-    "Smart follow-up question 1?",
-    "Smart follow-up question 2?",
-    "Smart follow-up question 3?"
-  ],
-  "addon_suggestion": "One plain sentence about compatible products to complete the setup. Empty string if not relevant."
-}
-
-Rules for the JSON:
-- No markdown symbols (**bold**, *italic*, bullet dashes) inside any field
-- Plain conversational text only
-- product_reasons: only include products you are actively recommending for THIS response. Must be EMPTY ({}) when answering follow-up questions about products already shown in history.
-- followup_questions: always 2-3 targeted questions, placed LAST
-- intro: keep under 2 sentences, warm and direct`;
+const CORS = {
+  'Access-Control-Allow-Origin':  '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Content-Type':                 'application/json'
+};
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  /* ── CORS pre-flight ── */
+  if (req.method === 'OPTIONS') return res.status(200).setHeaders(CORS).end();
 
-  const { query, history } = req.body || {};
-  if (!query) return res.status(400).json({ error: 'Missing query' });
+  Object.entries(CORS).forEach(([k, v]) => res.setHeader(k, v));
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL?.trim(),
-    process.env.SUPABASE_SECRET_KEY?.trim()
-  );
-  const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY?.trim() });
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { query, history = [], customerName = '', customerOrders = '' } = req.body || {};
+
+  if (!query || typeof query !== 'string' || !query.trim()) {
+    return res.status(400).json({ error: 'Missing query' });
+  }
 
   try {
-    // Enrich the embedding query with context from the last user turn so that
-    // follow-up questions ("what about lighter ones?") find relevant products
-    let embeddingQuery = query;
-    if (Array.isArray(history) && history.length >= 2) {
-      const lastUserMsg = [...history].reverse().find(m => m.role === 'user');
-      if (lastUserMsg) {
-        embeddingQuery = lastUserMsg.content.slice(0, 300) + ' ' + query;
-      }
-    }
+    /* ── 1. Build enriched embedding query (use prior context for follow-ups) ── */
+    const recentHistory  = Array.isArray(history) ? history : [];
+    const lastUserMsg    = recentHistory.filter(m => m.role === 'user').slice(-1)[0]?.content || '';
+    const enrichedQuery  = lastUserMsg && lastUserMsg !== query.trim()
+      ? `${lastUserMsg} ${query}`
+      : query;
 
+    /* ── 2. Generate embedding ── */
     const embRes = await openai.embeddings.create({
       model: 'text-embedding-3-small',
-      input: embeddingQuery.slice(0, 500)
+      input: enrichedQuery
     });
     const embedding = embRes.data[0].embedding;
 
-    const [
-      { data: products },
-      { data: collections },
-      { data: articles }
-    ] = await Promise.all([
-      supabase.rpc('search_products',    { query_embedding: embedding, match_count: 12 }),
-      supabase.rpc('search_collections', { query_embedding: embedding, match_count: 3 }),
-      supabase.rpc('search_articles',    { query_embedding: embedding, match_count: 2 })
+    /* ── 3. Supabase vector searches (products, collections, articles) ── */
+    const [prodRes, collRes, artRes] = await Promise.all([
+      supabase.rpc('match_products',    { query_embedding: embedding, match_threshold: 0.3, match_count: 6 }),
+      supabase.rpc('match_collections', { query_embedding: embedding, match_threshold: 0.3, match_count: 4 }),
+      supabase.rpc('match_articles',    { query_embedding: embedding, match_threshold: 0.3, match_count: 2 })
     ]);
 
-    const seen = new Set();
-    const uniqueProducts = (products || []).filter(p => {
-      if (seen.has(p.title)) return false;
-      seen.add(p.title);
-      return true;
-    });
+    const products    = prodRes.data  || [];
+    const collections = collRes.data  || [];
+    const articles    = artRes.data   || [];
 
-    const productContext = uniqueProducts.length
-      ? uniqueProducts.map(p =>
-          `- "${p.title}" | Tags: ${p.tags || 'none'} | Keywords: ${p.keywords || 'none'} | Price: $${p.price || 'POA'}`
-        ).join('\n')
-      : 'No products met the relevance threshold. Recommend based on product category knowledge only.';
+    /* ── 4. Build product & collection context strings ── */
+    const productContext = products.map((p, i) =>
+      `${i + 1}. Title: ${p.title}\n   Price: $${p.price}\n   URL: ${p.url}\n   Tags: ${p.tags || ''}\n   Keywords: ${p.keywords || ''}\n   Description: ${(p.body || '').slice(0, 200)}`
+    ).join('\n\n');
 
-    // Build messages: system → conversation history → current user turn with catalog
-    const recentHistory = Array.isArray(history) ? history.slice(-6) : [];
+    const collectionContext = collections.map((c, i) =>
+      `${i + 1}. Title: ${c.title}\n   URL: ${c.url}\n   Description: ${(c.body || '').slice(0, 150)}`
+    ).join('\n\n');
+
+    const articleContext = articles.map((a, i) =>
+      `${i + 1}. Title: ${a.title}\n   URL: ${a.url}`
+    ).join('\n');
+
+    /* ── 5. Customer personalisation string ── */
+    const customerContext = customerName
+      ? `CUSTOMER: ${customerName}${customerOrders ? ` | Order history: ${customerOrders}` : ''}`
+      : 'CUSTOMER: Guest (not logged in)';
+
+    /* ── 6. Conversation history strings ── */
+    const historyStr = recentHistory.length
+      ? recentHistory.map(m => `${m.role === 'user' ? 'Customer' : 'KS Agent'}: ${m.content}`).join('\n')
+      : 'None';
+
+    /* Extract what has already been shown to avoid repeating */
+    const shownProducts    = recentHistory
+      .filter(m => m.role === 'assistant' && m.content.includes('Products shown:'))
+      .flatMap(m => {
+        const match = m.content.match(/Products shown: (.+)/);
+        return match ? match[1].split(', ') : [];
+      });
+    const shownCollections = recentHistory
+      .filter(m => m.role === 'assistant' && m.content.includes('Collections shown:'))
+      .flatMap(m => {
+        const match = m.content.match(/Collections shown: (.+)/);
+        return match ? match[1].split(', ') : [];
+      });
+
+    /* ── 7. System prompt ── */
+    const systemPrompt = `You are KS, the Keyline Safety AI assistant. You help customers find safety equipment with a warm, expert, and consultative tone — like a knowledgeable friend who happens to sell safety gear.
+
+${customerContext}
+
+---
+PERSONALISATION RULES:
+- If you know the customer's name, address them by first name naturally in conversation (not every single message — just occasionally and when it feels natural, especially at the start of a new thread or after a few exchanges).
+- NEVER use pronouns like "he", "she", "they" to refer to the customer. Use the name or "you".
+- If the customer has a past order history, you may briefly acknowledge returning customers (e.g. "Welcome back!") on the first message only.
+- Do not mention order history after the first message unless directly relevant.
+
+---
+QUERY CLASSIFICATION — determine the type of query and respond accordingly:
+
+TYPE 1 — VAGUE QUERY (no specific product, hazard, or industry mentioned):
+  Examples: "I need safety gear", "looking for protection", "what do you have?"
+  Response: Do NOT recommend specific products yet. Ask 1–2 focused clarifying questions:
+    - "What industry are you working in?"
+    - "What specific hazard or task are you protecting against?"
+    - "Are you working at height, with chemicals, in construction?"
+  Suggest 2–3 relevant collections as a starting point. Set product_reasons to {}.
+
+TYPE 2 — SPECIFIC QUERY (product name, hazard, standard, or task mentioned):
+  Examples: "roof anchor for metal deck", "FR clothing for oil and gas", "harness under 500g"
+  Response: Recommend 2–4 products with a clear WHY for each. Be specific about what makes each a good fit for their stated need.
+
+TYPE 3 — BRAND QUERY (customer mentions a brand name):
+  Examples: "Petzl harness", "MSA hard hat", "3M respirator"
+  Response: Acknowledge the brand, recommend the matching brand collection page + 1–2 specific products from that brand if available. If brand not in inventory, suggest the closest alternative and explain why.
+
+TYPE 4 — NO INDUSTRY / NO CONTEXT (customer hasn't mentioned what they do):
+  Trigger: second message or beyond with no industry or hazard mentioned yet.
+  Response: Weave in the question naturally: "Just so I can point you to the most relevant options — what industry or type of work is this for?"
+
+TYPE 5 — NONSENSICAL / OFF-TOPIC QUERY:
+  Examples: "fart", "pizza", "what is love"
+  Response: Brief, light-hearted redirect. Examples:
+    - "fart" / "gas" → "Ha! If you're dealing with gas hazards on a worksite, I can help with that. Are you looking for gas detection equipment or respiratory protection?"
+    - "mask" → "Are you looking for respiratory protection, or a face shield for impact/chemical splash?"
+    - Completely unrelated → "Ha, I'm not sure I can help with that one! But if you're looking for safety gear, I'm your go-to."
+  Keep it brief and redirect to safety.
+
+TYPE 6 — FRUSTRATED / UNHAPPY / WANTS REAL PERSON:
+  Trigger words: "useless", "not helpful", "speak to someone", "real person", "call", "frustrated", "wrong"
+  Response: Apologise briefly, acknowledge the frustration, and ALWAYS offer: "You can speak directly with our Safety Expert at 519-453-6110 — they'll be happy to help."
+
+---
+SALES APPROACH (consultative, not pushy):
+- Lead with understanding the need before recommending products.
+- When recommending, explain WHY each product is a good fit — reference their stated hazard, industry standard, or task.
+- If multiple products fit, briefly explain the difference so they can choose.
+- Suggest add-ons naturally: "If you're using that harness on a roof, you'll also want a roof anchor — I can show you some options."
+- Never pressure. Use language like "Here's what I'd suggest..." not "You need to buy..."
+- If a product isn't in stock, honestly say so and suggest the closest alternative.
+
+---
+CONVERSATION CONTINUITY:
+- NEVER recommend the same product or collection twice in a conversation.
+- Products already shown this session: ${shownProducts.length ? shownProducts.join(', ') : 'none'}
+- Collections already shown: ${shownCollections.length ? shownCollections.join(', ') : 'none'}
+- If the customer asks a follow-up about something already shown, answer the question directly — do NOT re-list the same products. Use product_reasons: {} for those replies.
+- If the customer is clearly refining or following up on a previous question, use the history to understand context and respond naturally.
+
+---
+AVAILABLE PRODUCTS (from vector search — only recommend these):
+${productContext || 'No products found for this query.'}
+
+AVAILABLE COLLECTIONS:
+${collectionContext || 'No collections found.'}
+
+AVAILABLE ARTICLES:
+${articleContext || 'None.'}
+
+---
+CONVERSATION HISTORY (most recent last):
+${historyStr}
+
+---
+RESPONSE FORMAT — respond ONLY with valid JSON, no markdown, no code blocks:
+{
+  "intro": "Your conversational response here (1–3 sentences). Address by name if appropriate.",
+  "product_reasons": {
+    "Exact Product Title": "One sentence explaining why this specific product fits their need"
+  },
+  "collection_handles": ["handle-one", "handle-two"],
+  "article_handles": ["handle-one"],
+  "followup_questions": ["Short clickable question?", "Another option?"],
+  "addon_suggestion": "Optional: one sentence suggesting a complementary product or next step"
+}
+
+RULES FOR JSON OUTPUT:
+- product_reasons keys MUST exactly match product titles from the AVAILABLE PRODUCTS list above.
+- product_reasons MUST be {} (empty object) when: (a) query is vague and clarification is needed, (b) answering a follow-up about already-shown products, (c) a nonsensical query.
+- Only include products you are confident are relevant. Do not pad with weak matches.
+- collection_handles: include 1–3 relevant collection handles. For vague queries, always include collections.
+- followup_questions: 2–3 short, clickable questions. Make them feel like natural next steps.
+- addon_suggestion: only include if genuinely relevant. Leave as "" if not.
+- Keep intro warm and human. Do not sound robotic or formal.
+- Do not include any text outside the JSON object.`;
+
+    /* ── 8. Build messages array ── */
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
-      ...recentHistory.map(m => ({ role: m.role, content: m.content })),
-      {
-        role: 'user',
-        content: `Customer query: "${query}"\n\nAvailable catalog results (check Tags/Keywords match before recommending):\n${productContext}`
-      }
+      { role: 'system', content: systemPrompt },
+      ...recentHistory.slice(-6),
+      { role: 'user', content: query }
     ];
 
+    /* ── 9. GPT call ── */
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      response_format: { type: 'json_object' },
+      model:       'gpt-4o-mini',
       messages,
-      max_tokens: 700,
-      temperature: 0.5
+      temperature: 0.65,
+      max_tokens:  900
     });
 
+    const rawContent = completion.choices[0]?.message?.content || '{}';
+
+    /* ── 10. Parse GPT JSON response ── */
     let parsed;
     try {
-      parsed = JSON.parse(completion.choices[0].message.content);
+      const cleaned = rawContent.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
+      parsed = JSON.parse(cleaned);
     } catch {
-      parsed = {
-        intro: completion.choices[0].message.content,
-        product_reasons: {},
-        followup_questions: [],
-        addon_suggestion: ''
-      };
+      parsed = { intro: rawContent };
     }
 
-    // Only return products GPT actively chose to recommend.
-    // This prevents already-seen products from reappearing on follow-up turns.
-    const chosenProducts = uniqueProducts.filter(p => parsed.product_reasons?.[p.title]);
+    /* ── 11. Filter to only GPT-chosen products ── */
+    const productReasons = parsed.product_reasons || {};
+    const uniqueProducts = [];
+    const seenTitles     = new Set();
+    for (const p of products) {
+      if (!seenTitles.has(p.title)) {
+        seenTitles.add(p.title);
+        uniqueProducts.push(p);
+      }
+    }
+    const chosenProducts = uniqueProducts.filter(p => productReasons[p.title]);
 
-    res.json({
-      intro: parsed.intro || '',
-      followup_questions: parsed.followup_questions || [],
-      addon_suggestion: parsed.addon_suggestion || '',
-      products: chosenProducts.slice(0, 4).map(p => ({
-        title: p.title,
-        price: p.price,
-        url: p.url,
-        image_url: p.image_url || '',
-        reason: parsed.product_reasons[p.title] || ''
-      })),
-      collections: (collections || []).slice(0, 3).map(c => ({
-        title: c.title, url: c.url, image_url: c.image_url || ''
-      })),
-      articles: (articles || []).slice(0, 2).map(a => ({
-        title: a.title, url: a.url, image_url: a.image_url || ''
-      }))
+    /* ── 12. Map chosen products → response shape ── */
+    const responseProducts = chosenProducts.map(p => ({
+      title:     p.title,
+      price:     p.price,
+      url:       p.url,
+      image_url: p.image_url || '',
+      reason:    productReasons[p.title] || ''
+    }));
+
+    /* ── 13. Map collections by handle ── */
+    const collHandles      = Array.isArray(parsed.collection_handles) ? parsed.collection_handles : [];
+    const responseCollections = collHandles
+      .map(h => collections.find(c => c.handle === h))
+      .filter(Boolean)
+      .map(c => ({ title: c.title, url: c.url, image_url: c.image_url || '' }));
+
+    /* ── 14. Map articles by handle ── */
+    const artHandles       = Array.isArray(parsed.article_handles) ? parsed.article_handles : [];
+    const responseArticles = artHandles
+      .map(h => articles.find(a => a.handle === h))
+      .filter(Boolean)
+      .map(a => ({ title: a.title, url: a.url, image_url: a.image_url || '' }));
+
+    /* ── 15. Send response ── */
+    return res.status(200).json({
+      intro:              parsed.intro || 'Here\'s what I found for you.',
+      products:           responseProducts,
+      collections:        responseCollections,
+      articles:           responseArticles,
+      followup_questions: Array.isArray(parsed.followup_questions) ? parsed.followup_questions : [],
+      addon_suggestion:   parsed.addon_suggestion || ''
     });
 
   } catch (err) {
-    console.error('Chat error:', err);
-    res.status(500).json({ error: err.message || 'Internal server error' });
+    console.error('KS Agent error:', err);
+    return res.status(500).json({ error: 'Internal server error', details: err.message });
   }
 }
