@@ -2,7 +2,7 @@ import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY?.trim() });
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', `https://${process.env.SHOPIFY_STORE_DOMAIN}`);
