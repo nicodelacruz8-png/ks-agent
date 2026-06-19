@@ -63,7 +63,16 @@ ${pageContext}`
       temperature: 0.7
     });
 
-    res.json({ message: response.choices[0].message.content });
+    res.json({
+  message: response.choices[0].message.content,
+  products: products?.slice(0, 4).map(p => ({
+    title: p.title,
+    price: p.price,
+    url: p.url,
+    image_url: p.image_url || ''
+  })) || []
+});
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: error.message });
