@@ -96,19 +96,6 @@ Then list 2–4 possible interpretations.
 Then ask: "What type of work or hazard are they dealing with?"
 
 ════════════════════════════════════════
-RESPONSE FORMAT
-════════════════════════════════════════
-Use this structure:
-
-A. One-line understanding of the need
-B. Recommended products (from catalog)
-C. Why each fits
-D. 2–3 follow-up questions
-E. Compatible add-ons (if relevant)
-
-Use short paragraphs and bullet points. Keep it scannable. Do not write walls of text.
-
-════════════════════════════════════════
 SAFETY DISCLAIMER RULE
 ════════════════════════════════════════
 When recommending products for specific regulated tasks (confined space, electrical, fall arrest, respiratory), add:
@@ -117,7 +104,32 @@ When recommending products for specific regulated tasks (confined space, electri
 ════════════════════════════════════════
 CRITICAL FILTERING RULE
 ════════════════════════════════════════
-Check the Tags and Keywords of every product in the catalog. ONLY recommend products whose title, tags, or keywords directly relate to the customer's query. If a product does not match — skip it. Never recommend a hoist when someone asks about hi-vis. Never recommend fall protection when someone asks about gloves.`;
+Check the Tags and Keywords of every product in the catalog. ONLY recommend products whose title, tags, or keywords directly relate to the customer's query. If a product does not match — skip it. Never recommend a hoist when someone asks about hi-vis. Never recommend fall protection when someone asks about gloves.
+
+════════════════════════════════════════
+RESPONSE FORMAT — RETURN JSON ONLY
+════════════════════════════════════════
+You must return a valid JSON object. No markdown outside the JSON. No extra text.
+
+{
+  "intro": "1-2 plain sentences: your understanding of the need and what you are recommending. No markdown symbols like ** or *.",
+  "product_reasons": {
+    "Exact Product Title From Catalog": "One plain sentence explaining why this product fits their specific need."
+  },
+  "followup_questions": [
+    "Smart follow-up question 1?",
+    "Smart follow-up question 2?",
+    "Smart follow-up question 3?"
+  ],
+  "addon_suggestion": "One plain sentence about compatible products to complete the setup. Empty string if not relevant."
+}
+
+Rules for the JSON:
+- No markdown symbols (**bold**, *italic*, bullet dashes) inside any field
+- Plain conversational text only
+- product_reasons: only include products you are actually recommending from the catalog
+- followup_questions: always 2-3 targeted questions, placed LAST
+- intro: keep under 2 sentences, warm and direct`;
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -142,7 +154,6 @@ export default async function handler(req, res) {
     });
     const embedding = embRes.data[0].embedding;
 
-    // Search products, collections, and articles in parallel
     const [
       { data: products },
       { data: collections },
@@ -153,7 +164,6 @@ export default async function handler(req, res) {
       supabase.rpc('search_articles',    { query_embedding: embedding, match_count: 2 })
     ]);
 
-    // Deduplicate products by title
     const seen = new Set();
     const uniqueProducts = (products || []).filter(p => {
       if (seen.has(p.title)) return false;
@@ -161,7 +171,6 @@ export default async function handler(req, res) {
       return true;
     });
 
-    // Build product context including tags and keywords for relevance filtering
     const productContext = uniqueProducts.length
       ? uniqueProducts.map(p =>
           `- "${p.title}" | Tags: ${p.tags || 'none'} | Keywords: ${p.keywords || 'none'} | Price: $${p.price || 'POA'}`
@@ -170,41 +179,46 @@ export default async function handler(req, res) {
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         {
           role: 'user',
-          content: `Customer query: "${query}"
-
-Available catalog results (check Tags/Keywords match before recommending):
-${productContext}
-
-Respond following the structure: understand → recommend from catalog → follow-up questions → compatible add-ons.`
+          content: `Customer query: "${query}"\n\nAvailable catalog results (check Tags/Keywords match before recommending):\n${productContext}`
         }
       ],
-      max_tokens: 500,
+      max_tokens: 700,
       temperature: 0.5
     });
 
-    const message = completion.choices[0].message.content;
+    let parsed;
+    try {
+      parsed = JSON.parse(completion.choices[0].message.content);
+    } catch {
+      parsed = {
+        intro: completion.choices[0].message.content,
+        product_reasons: {},
+        followup_questions: [],
+        addon_suggestion: ''
+      };
+    }
 
     res.json({
-      message,
+      intro: parsed.intro || '',
+      followup_questions: parsed.followup_questions || [],
+      addon_suggestion: parsed.addon_suggestion || '',
       products: uniqueProducts.slice(0, 4).map(p => ({
         title: p.title,
         price: p.price,
         url: p.url,
-        image_url: p.image_url || ''
+        image_url: p.image_url || '',
+        reason: parsed.product_reasons?.[p.title] || ''
       })),
       collections: (collections || []).slice(0, 3).map(c => ({
-        title: c.title,
-        url: c.url,
-        image_url: c.image_url || ''
+        title: c.title, url: c.url, image_url: c.image_url || ''
       })),
       articles: (articles || []).slice(0, 2).map(a => ({
-        title: a.title,
-        url: a.url,
-        image_url: a.image_url || ''
+        title: a.title, url: a.url, image_url: a.image_url || ''
       }))
     });
 
